@@ -9,10 +9,13 @@ The files in this repository are the following:
 1. **Bioinformatic Analysis**
    This is the R script that was used to complete the bioinformatic analysis, using the input of R1 and R2 files, with the output as an ASV table and Taxonomy File
 
-2. **Taxonomy Reclassification**
+2. **QC Tracking Table**
+   This is the .xlsx file that outlines the number of sequences remainging for each sample at the end of the each stage of bioinformatic analysis.
+
+4. **Taxonomy Reclassification**
    This is the .xlsx file that outlines the manual reclassification of the fifty most abundant unclassified-by-UNITE ASVs. Including the NCBI accesssion codes, classification files and justifications for each decision
 
-3. **Molecular Ecology Analysis**
+5. **Molecular Ecology Analysis**
    This is the R script that was used to complete the molecular ecology analysis, using the input files of ASV table, taxonomy table and sample data table. The output is a rarefaction table.
 
 The intput files can be supplies upon resquest by contacting jgolz@unimelb.edu.au
