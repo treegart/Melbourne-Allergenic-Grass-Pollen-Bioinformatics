@@ -10,7 +10,7 @@ The files in this repository are the following:
    This is the R script that was used to complete the bioinformatic analysis, using the input of R1 and R2 files, with the output as an ASV table and Taxonomy File
 
 2. **QC Tracking Table**
-   This is the .xlsx file that outlines the number of sequences remainging for each sample at the end of the each stage of bioinformatic analysis.
+   This is the .xlsx file that outlines the number of sequences remaining for each sample at the end of the each stage of bioinformatic analysis.
 
 4. **Taxonomy Reclassification**
    This is the .xlsx file that outlines the manual reclassification of the fifty most abundant unclassified-by-UNITE ASVs. Including the NCBI accesssion codes, classification files and justifications for each decision
