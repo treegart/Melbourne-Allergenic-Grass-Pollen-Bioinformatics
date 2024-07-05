@@ -1,0 +1,71 @@
+#S2F-4unR1 Molecular Ecology analysis
+#This is the bioinformatic code to analyse the S2F-4unR1 samples from John Golz, 
+#using the approach of molecular ecology
+
+#Formal Bioinformatic Analysis commenced 21 Jun 2024
+
+#by Dr Lachlan Tegart
+
+#libraries
+library(vegan)# for ecology 
+library(ggplot2) # for plots
+library(dplyr) #for shaping objects
+library(data.table)
+library(phyloseq)
+library(nlme)
+library(tibble)
+library(reshape2)
+library(janitor) #for rownames to columns
+
+
+setwd("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/S2Fanalysis")
+
+
+#Read in The ASV
+ASV <- read.csv("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/S2Fanalysis/S2F_ASV.csv")
+ASV1 <- ASV %>% select(-X,-sequence) %>% tibble::column_to_rownames("ASVnames")
+#remove the X from the front of the sample names
+colnames(ASV1) <- gsub("^X", "", colnames(ASV1))
+colnames(ASV1) <- gsub("\\.", "-", colnames(ASV1))
+ASV2 <- as.matrix(ASV1)
+#put in phyloseq format
+OTU = otu_table(ASV2, taxa_are_rows = TRUE)
+
+#Read in the Taxonomy. Classified by DADA2
+TAX <- read.csv("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/S2Fanalysis/S2F_TAX.csv")
+TAX1 <- TAX %>% select(-sequence,-X) %>% tibble::column_to_rownames("ASVnames")
+#remove the X from the front of the sample names
+colnames(TAX1) <- gsub("^X", "", colnames(TAX1))
+# Remove prefixes
+TAX2 <- as.matrix(apply(TAX1, 2, function(x) gsub("^[a-z]__", "", x)))
+#put in phyloseq format
+TAX = tax_table(TAX2)
+
+
+#Read in the metadata - this is the raw table from the database
+META <- read.csv("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/S2Fanalysis/GolzMetadata.csv")
+META$Sampling.week.start.date <- as.Date(META$Sampling.week.start.date, format = "%d/%m/%Y")
+META$Sampling.week.end.date <- as.Date(META$Sampling.week.end.date, format = "%d/%m/%Y")
+META1 <- META %>% tibble::column_to_rownames("Sample.Name")
+
+
+samples = sample_data(META1)
+
+#make the phyloeq object
+phylo <- phyloseq(OTU, TAX, samples)
+
+#I need to change this to only be plants
+phyloPLANT <- subset_taxa(phylo, Kingdom=="Viridiplantae")
+
+#make a rarefaction curve
+#I want the lables to be the dates, not the sample names
+datemeta <- as.data.frame(as.matrix(phyloPLANT@sam_data)) %>% rownames_to_column("ID")
+otus <- as.data.frame(t(phyloPLANT@otu_table)) %>% rownames_to_column("ID")
+joined <- left_join(datemeta,otus,by="ID")
+#remove unwanted column
+joined1 <- joined %>% select(-ID,-Sampling.season,-Sampling.week.end.date) %>% column_to_rownames("Sampling.week.start.date")
+
+
+rc <- rarecurve(joined1, step=100, main='Rarefaction curve - plant only', xlab = "Sample Size", ylab = "Number of ASVs",label = TRUE)
+rc
+
