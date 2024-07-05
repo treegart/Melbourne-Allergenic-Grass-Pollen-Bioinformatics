@@ -1,0 +1,382 @@
+#S2F-4unR1 Analysis
+#This is the bioinformatic code to analyse the S2F-4unR1 samples from John Golz
+#Formal Bioinformatic Analysis commenced 13 May 2024
+#Analysis based on DADA2 pipeline
+#by Lachlan Tegart
+
+setwd("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/output")
+
+library(dada2); packageVersion("dada2")
+library(ShortRead)
+library(Biostrings)
+library(dplyr)
+library(tidyverse)
+
+path <- "C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/output/S2F-4unR1"
+list.files(path)
+
+# Forward and reverse fastq filenames have format: SAMPLENAME_R1_001.fastq and SAMPLENAME_R2_001.fastq
+fnFs <- sort(list.files(path, pattern="_R1.", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2", full.names = TRUE))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+
+#identify primers
+#forward primer is ITS-S2F
+FWD <- 'ATGCGATACTTGGTGTGAAT'
+#reverse primer is ITS-4unR1
+REV <- 'TCCTCCGCTTATTTATATGC'
+
+#this makes a function that calculalates the forward and reverse compliment orientations of the primers we used
+allOrients <- function(primer) {
+  # Create all orientations of the input sequence
+  require(Biostrings)
+  dna <- DNAString(primer)  # The Biostrings works w/ DNAString objects rather than character vectors
+  orients <- c(Forward = dna, Complement = complement(dna), Reverse = reverse(dna), 
+               RevComp = reverseComplement(dna))
+  return(sapply(orients, toString))  # Convert back to character vector
+}
+
+FWD.orients <- allOrients(FWD)
+REV.orients <- allOrients(REV)
+
+FWD.orients
+REV.orients
+
+fnFs.filtN <- file.path(path, "filtN", basename(fnFs)) # Put N-filterd files in filtN/ subdirectory
+fnRs.filtN <- file.path(path, "filtN", basename(fnRs))
+
+#this removes the Ns
+filterAndTrim(fnFs, fnFs.filtN, fnRs, fnRs.filtN, maxN = 0, multithread = FALSE)
+
+
+#If we set the number in the brackets as 1 we can work out how many times the primers occur in each direction in the first sample
+primerHits <- function(primer, fn) {
+  # Counts number of reads in which the primer is found
+  nhits <- vcountPattern(primer, sread(readFastq(fn)), fixed = FALSE)
+  return(sum(nhits > 0))
+}
+
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.filtN[[1]]), 
+      FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.filtN[[1]]), 
+      REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.filtN[[1]]), 
+      REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.filtN[[1]]))
+
+# Forward Complement Reverse RevComp
+# FWD.ForwardReads  115253          0       0       0
+# FWD.ReverseReads       0          0       0    2297
+# REV.ForwardReads       0          0       0      50
+# REV.ReverseReads  112411          0       0       0
+
+#this is good, all orientations are expected and represented
+
+
+##REMOVE PRIMERS----
+#use the cutadapt command
+cutadapt <- "C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/cutadapt.exe" # CHANGE ME to the cutadapt path on your machine
+system2(cutadapt, args = "--version") # Run shell commands from R
+
+#copied code from tutorial.
+#creates the output file names
+path.cut <- file.path(path, "cutadapt")
+if(!dir.exists(path.cut)) dir.create(path.cut)
+fnFs.cut <- file.path(path.cut, basename(fnFs))
+fnRs.cut <- file.path(path.cut, basename(fnRs))
+
+FWD.RC <- dada2:::rc(FWD)
+REV.RC <- dada2:::rc(REV)
+# Trim FWD and the reverse-complement of REV off of R1 (forward reads)
+R1.flags <- paste("-g", FWD, "-a", REV.RC) 
+# Trim REV and the reverse-complement of FWD off of R2 (reverse reads)
+R2.flags <- paste("-G", REV, "-A", FWD.RC) 
+# Run Cutadapt
+
+#copying the same code from p3p4 after the dada2 code didn't work
+
+#THIS ONE WORKED, IT MODIFIED THE PATHS TO USE THE shQuote() FUNCTION TO GET OVER THE FILES WITH SPACES APPARENTLY
+for(i in seq_along(fnFs)) {
+  system2(cutadapt, args = c(R1.flags, R2.flags, "-n", "2",
+                             "-o", shQuote(fnFs.cut[i]), "-p", shQuote(fnRs.cut[i]),
+                             shQuote(fnFs.filtN[i]), shQuote(fnRs.filtN[i])))
+}
+
+
+#now check to see if the primers have actually been removed
+rbind(FWD.ForwardReads = sapply(FWD.orients, primerHits, fn = fnFs.cut[[1]]), 
+      FWD.ReverseReads = sapply(FWD.orients, primerHits, fn = fnRs.cut[[1]]), 
+      REV.ForwardReads = sapply(REV.orients, primerHits, fn = fnFs.cut[[1]]), 
+      REV.ReverseReads = sapply(REV.orients, primerHits, fn = fnRs.cut[[1]]))
+
+# Forward Complement Reverse RevComp
+# FWD.ForwardReads       0          0       0       0
+# FWD.ReverseReads       0          0       0       0
+# REV.ForwardReads       0          0       0       0
+# REV.ReverseReads       0          0       0       0
+#completely eliminated primer!
+
+
+# Forward and reverse fastq filenames have the format:
+cutFs <- sort(list.files(path.cut, pattern = "_R1.", full.names = TRUE))
+cutRs <- sort(list.files(path.cut, pattern = "_R2.", full.names = TRUE))
+
+
+
+get.sample.name <- function(fname) {
+  # Use regex to extract the sample name
+  sample_name <- sub("^(.*S2F-4unR1).*", "\\1", basename(fname))
+  return(sample_name)
+}
+# Assuming cutFs contains your filenames
+sample.names <- unname(sapply(cutFs, get.sample.name))
+head(sample.names)
+
+#PLOT READ QUALITY PROFILES----
+plotQualityProfile(cutFs[1:2])
+##this didn't work for some reason,
+#i am just going to move on for now
+
+###Filter and trim----
+
+filtFs <- file.path(path.cut, "filtered", basename(cutFs))
+filtRs <- file.path(path.cut, "filtered", basename(cutRs))
+
+
+out <- filterAndTrim(cutFs, filtFs, cutRs, filtRs, maxN = 0, maxEE = c(4, 4), truncQ = 2,
+                     minLen = 50, rm.phix = TRUE, compress = TRUE, multithread = FALSE) 
+head(out)
+# 22-23_1_S2F-4unR1-Amplicon-Indexing_LJC6P_ATGGTTGACT-GGCCTGTCCT_L001_R1.fastq.gz    117617    104449
+# 22-23_10_S2F-4unR1-Amplicon-Indexing_LJC6P_CCACCAGGCA-CTTATGGAAT_L001_R1.fastq.gz    79222     70924
+# 22-23_11_S2F-4unR1-Amplicon-Indexing_LJC6P_GTGACACGCA-GCTTACGGAC_L001_R1.fastq.gz    67500     60702
+# 22-23_12_S2F-4unR1-Amplicon-Indexing_LJC6P_ACAGTGTATG-GAACATACGG_L001_R1.fastq.gz   142741    125281
+# 22-23_13_S2F-4unR1-Amplicon-Indexing_LJC6P_TGATTATACG-GTCGATTACA_L001_R1.fastq.gz    86206     76027
+# 22-23_14_S2F-4unR1-Amplicon-Indexing_LJC6P_CAGCCGCGTA-ACTAGCCGTG_L001_R1.fastq.gz    97365     85667
+#this is quite a good retention per sample
+
+###LEARN THE ERROR RATES----
+errF <- learnErrors(filtFs, multithread = TRUE)
+# 100539975 total bases in 437383 reads from 5 samples will be used for learning the error rates.
+
+errR <- learnErrors(filtRs, multithread = TRUE)
+# 100593935 total bases in 437383 reads from 5 samples will be used for learning the error rates.
+
+#visualise the estimated error rates as a sanity check
+plotErrors(errF, nominalQ = TRUE)
+
+
+#neither way seems to adhere to the graphs at all
+#I'm just going to go with 5
+
+###SAMPLE INFERENCE----
+
+dadaFs <- dada(filtFs, err = errF, multithread = TRUE)
+# Sample 1 - 104449 reads in 21614 unique sequences.
+# Sample 2 - 70924 reads in 18111 unique sequences.
+# Sample 3 - 60702 reads in 25088 unique sequences.
+# Sample 4 - 125281 reads in 43623 unique sequences.
+# Sample 5 - 76027 reads in 24090 unique sequences.
+# Sample 6 - 85667 reads in 24447 unique sequences.
+# Sample 7 - 133111 reads in 32187 unique sequences.
+# Sample 8 - 130185 reads in 33429 unique sequences.
+# Sample 9 - 54478 reads in 15508 unique sequences.
+# Sample 10 - 103152 reads in 14691 unique sequences.
+# Sample 11 - 113005 reads in 34280 unique sequences.
+# Sample 12 - 116633 reads in 23950 unique sequences.
+# Sample 13 - 103582 reads in 24195 unique sequences.
+# Sample 14 - 84334 reads in 17013 unique sequences.
+# Sample 15 - 89033 reads in 21312 unique sequences.
+# Sample 16 - 53931 reads in 14995 unique sequences.
+# Sample 17 - 72091 reads in 14251 unique sequences.
+# Sample 18 - 78755 reads in 28014 unique sequences.
+# Sample 19 - 57921 reads in 14070 unique sequences.
+# Sample 20 - 131488 reads in 31289 unique sequences.
+# Sample 21 - 74706 reads in 18852 unique sequences.
+# Sample 22 - 79811 reads in 20509 unique sequences.
+# Sample 23 - 119285 reads in 41570 unique sequences.
+# Sample 24 - 89206 reads in 28469 unique sequences.
+# Sample 25 - 89414 reads in 32721 unique sequences.
+# Sample 26 - 61747 reads in 20232 unique sequences.
+# Sample 27 - 76650 reads in 21501 unique sequences.
+# Sample 28 - 25548 reads in 7586 unique sequences.
+# Sample 29 - 39202 reads in 11119 unique sequences.
+# Sample 30 - 78610 reads in 23914 unique sequences.
+# Sample 31 - 53616 reads in 18957 unique sequences.
+# Sample 32 - 96975 reads in 26058 unique sequences.
+# Sample 33 - 109774 reads in 25613 unique sequences.
+# Sample 34 - 67017 reads in 16935 unique sequences.
+
+dadaRs <- dada(filtRs, err = errR, multithread = TRUE)
+# Sample 1 - 104449 reads in 26490 unique sequences.
+# Sample 2 - 70924 reads in 24928 unique sequences.
+# Sample 3 - 60702 reads in 22834 unique sequences.
+# Sample 4 - 125281 reads in 46912 unique sequences.
+# Sample 5 - 76027 reads in 25988 unique sequences.
+# Sample 6 - 85667 reads in 31758 unique sequences.
+# Sample 7 - 133111 reads in 39335 unique sequences.
+# Sample 8 - 130185 reads in 40643 unique sequences.
+# Sample 9 - 54478 reads in 16485 unique sequences.
+# Sample 10 - 103152 reads in 23842 unique sequences.
+# Sample 11 - 113005 reads in 40558 unique sequences.
+# Sample 12 - 116633 reads in 33965 unique sequences.
+# Sample 13 - 103582 reads in 37138 unique sequences.
+# Sample 14 - 84334 reads in 34123 unique sequences.
+# Sample 15 - 89033 reads in 30065 unique sequences.
+# Sample 16 - 53931 reads in 20258 unique sequences.
+# Sample 17 - 72091 reads in 34789 unique sequences.
+# Sample 18 - 78755 reads in 20461 unique sequences.
+# Sample 19 - 57921 reads in 21561 unique sequences.
+# Sample 20 - 131488 reads in 43450 unique sequences.
+# Sample 21 - 74706 reads in 26830 unique sequences.
+# Sample 22 - 79811 reads in 30626 unique sequences.
+# Sample 23 - 119285 reads in 44801 unique sequences.
+# Sample 24 - 89206 reads in 33763 unique sequences.
+# Sample 25 - 89414 reads in 34993 unique sequences.
+# Sample 26 - 61747 reads in 23007 unique sequences.
+# Sample 27 - 76650 reads in 26704 unique sequences.
+# Sample 28 - 25548 reads in 10096 unique sequences.
+# Sample 29 - 39202 reads in 14825 unique sequences.
+# Sample 30 - 78610 reads in 26130 unique sequences.
+# Sample 31 - 53616 reads in 16224 unique sequences.
+# Sample 32 - 96975 reads in 33963 unique sequences.
+# Sample 33 - 109774 reads in 37970 unique sequences.
+# Sample 34 - 67017 reads in 26982 unique sequences.
+
+###MERGE PAIRED READS----
+
+mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
+# 91138 paired-reads (in 527 unique pairings) successfully merged out of 103738 (in 1676 pairings) input.
+# 58467 paired-reads (in 270 unique pairings) successfully merged out of 69848 (in 1423 pairings) input.
+# 49669 paired-reads (in 242 unique pairings) successfully merged out of 59448 (in 1487 pairings) input.
+# 98860 paired-reads (in 890 unique pairings) successfully merged out of 122371 (in 4155 pairings) input.
+# 61950 paired-reads (in 483 unique pairings) successfully merged out of 74884 (in 2214 pairings) input.
+# 69918 paired-reads (in 463 unique pairings) successfully merged out of 84818 (in 2198 pairings) input.
+# 113922 paired-reads (in 629 unique pairings) successfully merged out of 132027 (in 2521 pairings) input.
+# 109127 paired-reads (in 821 unique pairings) successfully merged out of 128232 (in 3294 pairings) input.
+# 49314 paired-reads (in 240 unique pairings) successfully merged out of 54216 (in 809 pairings) input.
+# 89623 paired-reads (in 561 unique pairings) successfully merged out of 102566 (in 1553 pairings) input.
+# 91149 paired-reads (in 784 unique pairings) successfully merged out of 111192 (in 3281 pairings) input.
+# 98156 paired-reads (in 570 unique pairings) successfully merged out of 115787 (in 2134 pairings) input.
+# 84358 paired-reads (in 535 unique pairings) successfully merged out of 101033 (in 2597 pairings) input.
+# 67266 paired-reads (in 374 unique pairings) successfully merged out of 81483 (in 1915 pairings) input.
+# 73024 paired-reads (in 538 unique pairings) successfully merged out of 87758 (in 2303 pairings) input.
+# 44605 paired-reads (in 253 unique pairings) successfully merged out of 52950 (in 1358 pairings) input.
+# 58615 paired-reads (in 304 unique pairings) successfully merged out of 71389 (in 1642 pairings) input.
+# 63853 paired-reads (in 232 unique pairings) successfully merged out of 78330 (in 695 pairings) input.
+# 51081 paired-reads (in 387 unique pairings) successfully merged out of 57027 (in 970 pairings) input.
+# 110323 paired-reads (in 957 unique pairings) successfully merged out of 129688 (in 3264 pairings) input.
+# 61573 paired-reads (in 480 unique pairings) successfully merged out of 73419 (in 1979 pairings) input.
+# 69342 paired-reads (in 503 unique pairings) successfully merged out of 78392 (in 1705 pairings) input.
+# 98511 paired-reads (in 752 unique pairings) successfully merged out of 117356 (in 3207 pairings) input.
+# 77384 paired-reads (in 525 unique pairings) successfully merged out of 88073 (in 1910 pairings) input.
+# 74994 paired-reads (in 521 unique pairings) successfully merged out of 88082 (in 2263 pairings) input.
+# 53693 paired-reads (in 504 unique pairings) successfully merged out of 60340 (in 1645 pairings) input.
+# 68046 paired-reads (in 438 unique pairings) successfully merged out of 75560 (in 1316 pairings) input.
+# 21598 paired-reads (in 210 unique pairings) successfully merged out of 24894 (in 738 pairings) input.
+# 34985 paired-reads (in 338 unique pairings) successfully merged out of 38609 (in 931 pairings) input.
+# 69607 paired-reads (in 639 unique pairings) successfully merged out of 76997 (in 1911 pairings) input.
+# 47018 paired-reads (in 317 unique pairings) successfully merged out of 52735 (in 1218 pairings) input.
+# 82690 paired-reads (in 597 unique pairings) successfully merged out of 95253 (in 2216 pairings) input.
+# 91182 paired-reads (in 602 unique pairings) successfully merged out of 108215 (in 2281 pairings) input.
+# 55608 paired-reads (in 432 unique pairings) successfully merged out of 66281 (in 1557 pairings) input.
+
+
+###CONSTRUCT SEQUENCE TABLE
+#We can now construct an amplicon sequence variant table (ASV) table, a higher-resolution version of the OTU table produced by traditional methods.
+
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+#34 9467
+
+###REMOVE CHIMERAS
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE)
+# Identified 6261 bimeras out of 9467 input sequences.
+
+table(nchar(getSequences(seqtab.nochim)))
+
+lengths <- nchar(getSequences(seqtab.nochim))
+hist(lengths, breaks = 30, col = "skyblue", xlab = "Sequence Length", ylab = "Frequency", main = "S2F-4unR1 ITS2 Sequence Length Distribution")
+
+
+#TRACK READS THROUGH THE PIPELINE
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, getN),
+               rowSums(seqtab.nochim))
+# If processing a single sample, remove the sapply calls: e.g. replace
+# sapply(dadaFs, getN) with getN(dadaFs)
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+
+
+#Export table to make supplementary table
+write.csv(track, file="S2F4unr1QCtable.csv", row.names=TRUE)
+
+
+
+seqtab.nochim <- read.csv("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/S2F-4unR1.seqtab.nochim.csv")
+
+###ASSIGN TAXONOMY----
+#this was done with the HPC
+
+second_db = data.frame(seqtab.nochim)
+taxa_2 = assignTaxonomy(colnames(second_db)[-1],"sh_general_release_s_all_04.04.2024/sh_general_release_dynamic_s_all_04.04.2024.fasta" ,multithread = TRUE)
+write.csv(taxa_2, "taxa_S2F.csv")
+
+###try to reclassify the missing taxonomies
+taxa_S2F <- read.csv("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/output/taxa_S2F.csv")
+#just try doing the first 10 classifications
+missingID <- taxa_S2F %>% filter(is.na(Kingdom))
+completedID <- taxa_S2F %>% filter(!is.na(Kingdom))
+
+write.csv(missingID, "missingID_S2F_EDIT.csv")
+
+#I manually curated the missing_IDs by running systematic BLASTs
+#I reclassified the top 50 out of the 666.
+#I reserve the right to come back and do the remaining ones
+missingIDedits <- read.csv("C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/missingID_S2F_EDIT_BLAST_EXPORT.csv")
+missingIDedits <- missingIDedits %>% select(2:9)
+
+
+
+#join them together in an rbind
+reclass_comb <- rbind(completedID,missingIDedits)
+
+
+#rename X to sequenceID
+names(reclass_comb)[names(reclass_comb) == 'X'] <- 'sequence'
+#transpose the ASV table
+ASVtable <- as.data.frame((seqtab.nochim)) %>% column_to_rownames("X")
+#clean the sample names
+rownames(ASVtable) <- sub("^(.*?4unR1).*", "\\1", rownames(ASVtable))
+
+
+#####save sequences and change names to ASV1 ASV2 ASV3 etc
+ASVnames=sprintf("ASV%s",seq(1:ncol(ASVtable))) ##### create a vector with new names
+sequence = colnames(ASVtable) #### extract the sequences
+sequencesnames=t(rbind(ASVnames, sequence)) #### create a data.frame with all this
+#assign ASV names to replace the sequenceIDs
+#write sequence names out to a table
+write.csv(sequencesnames, "C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/output/S2Fsequencesnames.csv") ### write a CSV file with all that inside
+
+#carefully match the sequences to the new sequenceIDs
+#just in case there was a jumble along the way i need to make sure these are correct
+ASVtab <- as.data.frame(t(ASVtable)) %>% rownames_to_column("sequence")
+
+ASVtab <- left_join(as.data.frame(sequencesnames),ASVtab, by="sequence")
+#that should be correct now
+#now do it for Tax
+
+TAXtable <- reclass_comb #%>% column_to_rownames("sequence")
+TAXtab <- left_join(as.data.frame(sequencesnames),TAXtable, by="sequence")
+
+#make a table with ASV and TAX
+S2Fcombined <- left_join(TAXtab,ASVtab, by='sequence')
+
+#do a sanity check to see that there are 666-50 with the kingdom as na
+kingdomna <- S2Fcombined %>% filter(is.na(Kingdom))
+#dim 616X30
+#that worked by the looks of it
+#this makes me think that the classifcations lined up properly
+
+#when you go back and make them into phyloseq objects, I think I need to remove the actul seqeunce column
+write.csv(ASVtab, "C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/output/S2F_ASV.csv") ### write a CSV file with all that inside
+write.csv(TAXtab, "C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/output/S2F_TAX.csv") ### write a CSV file with all that inside
+write.csv(S2Fcombined, "C:/Users/ljtegart/OneDrive - University of Tasmania/Masters Work/GolzData/output/S2F_combined.csv") ### write a CSV file with all that inside
+
